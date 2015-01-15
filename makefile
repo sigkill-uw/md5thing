@@ -20,17 +20,17 @@ CC = gcc
 SOURCE = main.c table.c
 OBJECTS = $(SOURCE:.c=.o)
 OUTPUT = md5thing
-CFLAGS = -Wall -Wextra -Werror -O4 -std=c99 -pedantic `pkg-config openssl --libs --cflags`
+CFLAGS = -Wall -Wextra -Werror -O4 -std=c99 -pedantic `pkg-config openssl --libs --cflags` -ggdb
 
 .PHONY: all
 .PHONY: clean
 
 all: $(OUTPUT)
 
-$(OUTPUT): makefile $(OBJECTS)
+$(OUTPUT): $(OBJECTS)
 	$(CC) -o $(OUTPUT) $(OBJECTS) $(CFLAGS)
 
-%.o: %.c %.h node.h
+%.o: %.c %.h
 	$(CC) -c $< $(CFLAGS)
 
 clean:

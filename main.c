@@ -5,119 +5,120 @@
 #include <stdint.h>
 #include <string.h>
 #include <errno.h>
-
-#include <openssl/md5.h>
+#include <assert.h>
 
 #include "table.h"
 
 inline void usage(char *name);
+inline int bmain(int argc, char **argv);
+inline int qmain(int argc, char **argv);
 
 int main(int argc, char **argv)
 {
-	//FILE *input;
-	//FILE *output;
-
-	/*struct
-	{
-		unsigned char *pool;
-		int index;
-		int cap;
-	} spool;
-
 	if(argc == 1)
 	{
 		usage(argv[0]);
+		return 1;
 	}
-	if(strcmp(argv[1], "--build") == 0 && argc <= 3)
+	else if(argc <= 4)
 	{
-		spool.pool = (unsigned char *)malloc(sizeof(unsigned char *) * 256);
-		if(spool.pool == NULL)
-		{}
-	}
-	else if(strcmp(argv[1], "--query") == 0 && argc <= 3)
-	{
+		if(strcmp(argv[1], "--build") == 0)
+		{
+			return bmain(argc, argv);
+		}
+		else if(argc >= 2 && strcmp(argv[1], "--query") == 0)
+		{
+			return qmain(argc, argv);
+		}
+		else
+		{
+			usage(argv[0]);
+			return 1;
+		}
 	}
 	else
 	{
 		usage(argv[0]);
-	}*/
-
-	if(argc == (int)**argv){}
-
-	int i;
-	table_t table[TABLE_SIZE];
-	FILE *in = fopen("words2.txt", "r");
-	unsigned char *this;
-	unsigned char *that;
-	int c;
-
-	table_init(table);
-
-	i = 0;
-	while(!feof(in))
-	{
-		i ++;
-		if(i % 10000 == 0)
-			printf("Read %d\n", i);
-
-		this = (unsigned char *)malloc(256);
-		*this = 0;
-		for(c = fgetc(in); c != '\n' && c != EOF; c = fgetc(in))
-			this[(int)((*this) ++) + 1] = (unsigned char)c;
-
-		that = (unsigned char *)malloc(16);
-		MD5(this + 1, (int)*this, that);
-
-		/*for(c = 0; c < (int)*this; c ++)
-			putchar(this[1 + c]);
-		putchar('\t');
-		for(c = 0; c < 16; c ++)
-			printf("%02x", (int)that[c]);
-		putchar('\n');*/
-
-		table_insert(table, this, that);
+		return 1;
 	}
+}
 
-			printf("Read %d\n", i);
+inline int bmain(int argc, char **argv)
+{
+	table_t table[TABLE_SIZE];
+	FILE *words;
+	FILE *output;
 
-	table_finalize(table);
+	words = (argc > 2) ? fopen(argv[2], "r") : stdin;
+	assert(words); /* FIXME */
 
-	for(c = 0; c < 80; c ++)
-		printf("%d\n", table[c].n);
+	table_populate(table, words);
 
-	unsigned char foo[16];
-	while(!feof(stdin))
+	output = (argc > 3) ? fopen(argv[3], "wb") : stdout;
+	assert(output);	/* FIXME */
+
+	table_write(table, output);
+
+	if(output != stdout)
+		fclose(output);
+
+	table_destroy(table);
+
+	return 0;
+}
+
+inline int qmain(int argc, char **argv)
+{
+	FILE *db;
+	FILE *input;
+	int i, j, k;
+	table_t table[TABLE_SIZE];
+	unsigned char buf[16];
+	unsigned char *res;
+
+	db = fopen(argv[2], "rb");
+	assert(db); /* FIXME */
+
+	table_read(table, db);
+
+	fclose(db);
+
+	input = (argc > 3) ? fopen(argv[3], "r") : stdin;
+
+	do
 	{
-		scanf(" ");
+		fscanf(input, " ");
 
-		int p, q;
-		for(c = 0; c < 16; c ++)
+		for(i = 0; i < 16; i ++)
 		{
-			p = getchar();
-			q = getchar();
+			j = fgetc(input);
+			k = fgetc(input);
 
-			if('0' <= p && p <= '9') p -= '0';
-			else if ('a' <= p && p <= 'f') p = p -'a' + 10;
-			else puts("no");
+			if('0' <= j && j <= '9') j -= '0';
+			else if('a' <= j && j <= 'f') j -= 'a' - 10;
+			else if('A' <= j && j <= 'F') j -= 'A' - 10;
+			else assert(0);	/* FIXME */
 
-			if('0' <= q && q <= '9') q -= '0';
-			else if ('a' <= q && q <= 'f') q = q - 'a' + 10;
-			else puts("no");
+			if('0' <= k && k <= '9') k -= '0';
+			else if('a' <= k && k <= 'f') k -= 'a' - 10;
+			else if('A' <= k && k <= 'F') k -= 'A' - 10;
+			else assert(0);	/* FIXME */
 
-			foo[c] = p * 16 + q;
+			buf[i] = 16 * j + k;
 		}
 
-		unsigned char *bar = table_search(table, foo);
-
-		if(bar == NULL)
-			puts("No go");
+		res = table_search(table, buf);
+		if(res == NULL)
+			puts("Nope.");
 		else
 		{
-			for(c = 0; c < *bar; c ++)
-				putchar(bar[1 + c]);
+			for(i = 0; i < res[0]; i ++)
+				putchar(res[1 + i]);
 			putchar('\n');
 		}
-	}
+	} while(!feof(input));
+
+	fclose(input);
 
 	return 0;
 }
@@ -128,6 +129,4 @@ inline void usage(char *name)
 	fprintf(stderr, "  --build [wordlist=stdin] [table=stdout]   Reads a newline-delimited wordlist and builds the corresponding MD5 table\n");
 	fprintf(stderr, "  --query <table> [queries=stdin]           Loads an existing MD5 table file and answers lookup queries\n");
 	fprintf(stderr, "  --help                                    Displays this dialogue\n");
-
-	exit(1);
 }

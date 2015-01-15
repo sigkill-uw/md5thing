@@ -12,8 +12,8 @@
 /* A single (hash, plaintext) pair, easily sortable */
 typedef struct
 {
-	unsigned char *plain;
 	unsigned char *hash;
+	unsigned char *plain;
 } record_t;
 
 typedef struct
@@ -26,10 +26,11 @@ typedef struct
 typedef branch_t table_t;
 
 void table_init(table_t *table);
-void table_insert(table_t *table, unsigned char *plain, unsigned char *hash);
+void table_insert(table_t *table, unsigned char *hash, unsigned char *plain);
 void table_finalize(table_t *table);
-void table_read(table_t *table, FILE *input);
 void table_write(table_t *table, FILE *output);
+void table_read(table_t *table, FILE *input);
+void table_populate(table_t *table, FILE *words);
 unsigned char *table_search(table_t *table, unsigned char *hash);
 void table_destroy(table_t *table);
 
