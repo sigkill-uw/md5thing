@@ -70,6 +70,13 @@ int table_build(table_t table, FILE *list)
 	/* Counters/characters */
 	int n, i, c;
 
+	/*
+		Assume table is unitialized. This feels a little silly,
+		since table_build otherwise plays nice with a pre-filled table.
+		Oh well - we'll address that later. FIXME
+	*/
+	table_init(table);
+
 	/* Read until EOF */
 	for(n = 0, c = fgetc(list); c != EOF; n ++)
 	{
@@ -95,25 +102,80 @@ int table_build(table_t table, FILE *list)
 		digest = MD5(plain + 1, i, NULL);
 		assert(digest);
 
-		/* Take the tabular prefix */
-		i = TABLE_PREFIX(digest);
-
 		/* We need to store within the table the tail of the hash along with the entirety of the plaintext string */
-		blob = palloc_alloc((HASH_SIZE - INDEX_SIZE) + (1 + (int)plain[0])); /* Shouldn't fail, at least not here */
+		blob = palloc_alloc((HASH_SIZE - INDEX_SIZE) + (1 + i)); /* Shouldn't fail, at least not here */
 
 		/* Copy everything over */
 		memcpy(blob, digest + INDEX_SIZE, HASH_SIZE - INDEX_SIZE);
-		memcpy(blob + HASH_SIZE - INDEX_SIZE, plain, 1 + (int)plain[0]);
+		memcpy(blob + HASH_SIZE - INDEX_SIZE, plain, 1 + i);
 
 		/* Inser the blob of data into the appropriate sub-list of the dictioanry */
-		insert_blob(&table[i], blob); /* Can't fail here either */
+		insert_blob(&table[TABLE_PREFIX(digest)], blob); /* Can't fail here either */
 	}
 
-	/* Sort everythign so we can search it later. I'm not even sure how much this saves, but it's fun. */
+	/* Sort everything so we can search it later. I'm not even sure how much time this saves, but it's fun. */
 	for(i = TABLE_SIZE; i --;)
 		qsort(table[i].data, table[i].count, sizeof(*table[i].data), cmp_blob);
 
 	/* Might as well return something useful - the count of all the items in the table */
+	return n;
+}
+
+int table_read(table_t table, FILE *in)
+{
+	/* Digest (allocated here this time) */
+	unsigned char digest[HASH_SIZE];
+
+	/* Blob of hash:text data */
+	unsigned char *blob;
+
+	/* Counters/characters */
+	int i,  n;
+
+	/* Again, assume table is uninitialized. Another possible FIXME */
+	table_init(table);
+
+	/* Loop until EOF */
+	for(n = 0;; n ++)
+	{
+		/* Read a hash */
+		if(fread(digest, sizeof(unsigned char), HASH_SIZE, in) != HASH_SIZE)
+			quit("error reading table file: premature EOF or read error", NULL);
+
+		/*
+			Maybe we shouldn't have these errors here - by delivering an error code to main instead,
+			we could maybe provide the filename in the error message. FIXME
+		*/
+
+		/* Read the length of the Pascal-style string */
+		i = fgetc(in);
+		if(i == EOF)
+			quit("error reading table file: premature EOF or read error", NULL);
+
+		/*
+			We already know the overall length required.
+			No need for a local plaintext buffer; just allocate the blob.
+		*/
+		blob = palloc_alloc((HASH_SIZE - INDEX_SIZE) + (1 + i));
+
+		/* Copy the digest tail and the length header */
+		memcpy(blob, digest + INDEX_SIZE, HASH_SIZE - INDEX_SIZE);
+		blob[HASH_SIZE - INDEX_SIZE] = (unsigned char)i;
+
+		/* We can now just fread the plaintext into the blob. Cast i to quiet -Wall -Wextra. */
+		if(fread(blob + (HASH_SIZE - INDEX_SIZE) + 1, sizeof(unsigned char), i, in) != (unsigned int)i)
+			quit("error reading table file: premature EOF or read error", NULL);
+
+		/* Insert */
+		insert_blob(&table[TABLE_PREFIX(digest)], blob);
+	}
+
+	/*
+		We shouldn't need to finalize the table by sorting here; the table file format is pre-sorted.
+		However, we could certainly verify that the input is sorted. Good idea? FIXME?
+	*/
+
+	/* Return the total read */
 	return n;
 }
 

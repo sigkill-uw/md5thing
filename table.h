@@ -54,7 +54,7 @@ void table_destroy(table_t table);
 const unsigned char *table_search(table_t table, char hash[HASH_SIZE]);
 
 int table_build(table_t table, FILE *list);
-void table_read(table_t table, FILE *in);
+int table_read(table_t table, FILE *in);
 void table_write(table_t table, FILE *out);
 
 #endif

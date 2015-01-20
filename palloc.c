@@ -24,7 +24,6 @@
 #include <errno.h>
 
 #include "palloc.h"
-
 #include "quit.h"
 
 /*
@@ -39,8 +38,8 @@
 	however, a call to realloc can invalidate the old pointer, and hence invalidate every string in the pool.
 	No good.
 
-	This solution does creat some wastage, but not more than (HASH_SIZE - INDEX_SIZE + MAX_PLAIN_LENGTH) bytes, per pool
-	against about 64MB of data per pool.
+	This solution does create some wastage, but not more than (HASH_SIZE - INDEX_SIZE + MAX_PLAIN_LENGTH)
+	[300ish] bytes per pool, against about 64MB of data per pool.
 */
 
 /*
