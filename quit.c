@@ -1,5 +1,5 @@
 /*
-	main.c - entry point for md5thing.
+	quit.c - graceful quit function.
 	Copyright (C) 2015 Adam Richardson
 
 	This program is free software: you can redistribute it and/or modify
@@ -16,21 +16,38 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define _MAIN_C_
+#define _QUIT_C_
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #include "quit.h"
 
-int bmain(int argc, char **argv);
-int pmain(int argc, char **argv);
-void usage(void);
+/* This is kind of kludgy, and is already implemented to an extent in err.h. Whatever. */
 
-int main(int argc, char **argv)
+/* Program name (ie. argv[0]). Set this from main before using quit */
+char *program_name;
+
+void quit(const char *mx, const char *my)
 {
-	/* In quit.c */
-	program_name = argv[0];
-	(void)argc;
+	/* If mx is NULL, we just die. Else, */
+	if(mx)
+	{
+		/* Print the program name and mx */
+		fputs(program_name, stderr);
+		fputc(':', stderr);
+		fputs(mx, stderr);
 
-	return 0;
+		/* Maybe my as well */
+		if(my)
+		{
+			fputc(':', stderr);
+			fputs(my, stderr);
+		}
+
+		fputc('\n', stderr);
+	}
+
+	/* Die. No cleanup, but it shouldn't be necessary. */
+	exit(1);
 }

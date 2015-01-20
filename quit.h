@@ -1,5 +1,5 @@
 /*
-	main.c - entry point for md5thing.
+	quit.h - header file for graceful quit function.
 	Copyright (C) 2015 Adam Richardson
 
 	This program is free software: you can redistribute it and/or modify
@@ -16,21 +16,13 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define _MAIN_C_
+#ifndef _QUIT_H_
+#define _QUIT_H_
 
-#include <stdio.h>
+/* In quit.c */
+extern char *program_name;
 
-#include "quit.h"
+/* Prints some messages (NULL if nothing is to be printed) and dies, yielding a value of 1 to the operating system */
+void quit(const char *mx, const char *my);
 
-int bmain(int argc, char **argv);
-int pmain(int argc, char **argv);
-void usage(void);
-
-int main(int argc, char **argv)
-{
-	/* In quit.c */
-	program_name = argv[0];
-	(void)argc;
-
-	return 0;
-}
+#endif

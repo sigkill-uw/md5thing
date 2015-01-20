@@ -1,183 +1,164 @@
+/*
+	table.c - implementation of MD5 associative table structure.
+	Copyright (C) 2015 Adam Richardson
+
+	This program is free software: you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation, either version 3 of the License, or
+	(at your option) any later version.
+
+	This program is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with this program.  If not, see <http://www.gnu.org/licenses/>.
+*/
+
 #define _TABLE_C_
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <assert.h>
+#include <string.h>
+#include <errno.h>
 
 #include <openssl/md5.h>
 
 #include "table.h"
+#include "palloc.h"
+#include "quit.h"
 
-int cmp_records(const void *x, const void *y);
-void branch_insert(branch_t *branch, unsigned char *plain, unsigned char *hash);
+/* Initial capacity for a sub-list of the table */
+#define BRANCH_INITIAL_CAP	256
 
-void table_init(table_t *table)
+/* Helper function. Just a vector insertion. It doesn't fail, in the sense that it'll just kill the program if it screws up */
+inline void insert_blob(struct branch *br, unsigned char *blob);
+
+/* Comparison function for use with qsort. A blob is a plaintext prepended with a hash - we just compare the hash. */
+int cmp_blob(const void *x, const void *y);
+
+/* Initialize a table */
+void table_init(table_t table)
 {
 	int i;
+
+	/* Every sub-array is empty and can't hold anything (since the pointer is garbage) */
 	for(i = TABLE_SIZE; i --;)
-		table[i].n = table[i].c = 0;
+		table[i].count = table[i].cap = 0;
 }
 
-void table_insert(table_t *table, unsigned char *hash, unsigned char *plain)
+/* Destroy a table */
+void table_destroy(table_t table)
 {
-	branch_insert(&table[(int)hash[0] + 256 * (int)hash[1]], plain, hash);
+	/* This doesn't actually need to do anything. Allocation stuff is handled in palloc.c */
+	(void)table;
 }
 
-void table_finalize(table_t *table)
+int table_build(table_t table, FILE *list)
 {
-	int i;
+	/* Pascal-style strings for plaintext */
+	unsigned char plain[MAX_PLAIN_LENGTH + 1];
+
+	/* MD5 buffer is statically allocated by OpenSSL */
+	unsigned char *digest;
+
+	/* Data blob to be inserted into the table */
+	unsigned char *blob;
+
+	/* Counters/characters */
+	int n, i, c;
+
+	/* Read until EOF */
+	for(n = 0, c = fgetc(list); c != EOF; n ++)
+	{
+		/* The code to read a plaintext line is probably going to pop up elsewhere, and so will probably be re-refactored */
+
+		/* Read newline-delimited words, but only up to the appropriate length (255 on pretty much every platform) */
+		for(i = 0; i < MAX_PLAIN_LENGTH && (c = fgetc(list)) != EOF && c != '\n'; i ++)
+			plain[1 + i] = c;
+
+		/* We had to store the length in i, because otherwise the Pascal-style counter would have overflowed */
+		plain[0] = (unsigned char)i;
+
+		/*
+			FIXME: We should warn about the truncated input here, probably.
+			FIXME: Also, should we check for an error indicator on the file? Or shall we just take EOF at face value?
+		*/
+
+		/* If the word is too long, just read until EOF or newline */
+		if(i == MAX_PLAIN_LENGTH && c != EOF && c != '\n')
+			while((c = fgetc(list)) != EOF && c != '\n');
+
+		/* Compute the hash, ignoring the leading size byte in plain. The assertion definitely shouldn't fail. */
+		digest = MD5(plain + 1, i, NULL);
+		assert(digest);
+
+		/* Take the tabular prefix */
+		i = TABLE_PREFIX(digest);
+
+		/* We need to store within the table the tail of the hash along with the entirety of the plaintext string */
+		blob = palloc_alloc((HASH_SIZE - INDEX_SIZE) + (1 + (int)plain[0])); /* Shouldn't fail, at least not here */
+
+		/* Copy everything over */
+		memcpy(blob, digest + INDEX_SIZE, HASH_SIZE - INDEX_SIZE);
+		memcpy(blob + HASH_SIZE - INDEX_SIZE, plain, 1 + (int)plain[0]);
+
+		/* Inser the blob of data into the appropriate sub-list of the dictioanry */
+		insert_blob(&table[i], blob); /* Can't fail here either */
+	}
+
+	/* Sort everythign so we can search it later. I'm not even sure how much this saves, but it's fun. */
 	for(i = TABLE_SIZE; i --;)
-		qsort(table[i].r, table[i].n, sizeof(record_t), cmp_records);
+		qsort(table[i].data, table[i].count, sizeof(*table[i].data), cmp_blob);
+
+	/* Might as well return something useful - the count of all the items in the table */
+	return n;
 }
 
-void table_populate(table_t *table, FILE *words)
+inline void insert_blob(struct branch *br, unsigned char *blob)
 {
-	int i, c;
-	unsigned char *word;
-
-	table_init(table);
-
-	do
+	/* A capacity of 0 indicates that the pointer is garbage */
+	if(br->cap == 0)
 	{
-		word = (unsigned char *)malloc(256 + HASH_BYTE_SIZE);
-		assert(word);	/* FIXME */
+		/*
+			Allocate room for some amount of data. As of this writing:
+			256 slots across 256^2 different table sub-lists is enough for 16 million-ish hash:plain entries.
+			Might tune this upwards after testing.
+		*/
 
-		for(c = fgetc(words), i = 0; c != '\n' && c != EOF && i < 255; c = fgetc(words), i ++)
-			word[HASH_BYTE_SIZE + 1 + i] = (unsigned char)c;
+		br->data = (unsigned char **)malloc(sizeof(unsigned char **) * BRANCH_INITIAL_CAP);
 
-		if(i == 255 && c != '\n' && c != EOF)
-		{
-			/* FIXME */
-			puts("Word too long");
-			exit(1);
-		}
+		/*
+			The same design choice alluded to elsewhere: do we die on failure,
+			or do we act like malloc and return something sensible?
+			I like the latter for now.
+		*/
+		if(!br->data)
+			quit("error allocating store", strerror(errno));
 
-		/* FIXME */
-		word = realloc(word, HASH_BYTE_SIZE + 1 + i);
-		assert(word);
+		/* Capacity has changed */
+		br->cap = BRANCH_INITIAL_CAP;
 
-		word[HASH_BYTE_SIZE] = (unsigned char)i;
-		MD5(&word[HASH_BYTE_SIZE + 1], i, word);
-
-		table_insert(table, word, &word[HASH_BYTE_SIZE]);
-	} while(c != EOF);
-
-	table_finalize(table);
-}
-
-void table_read(table_t *table, FILE *input)
-{
-	int i;
-	unsigned char *word;
-
-	table_init(table);
-
-	do
+		/* NB: our initialization function for the table also set count = 0 */
+	}
+	else if(br->count == br->cap) /* If we're out of room, */
 	{
-		word = (unsigned char *)malloc(256 + HASH_BYTE_SIZE);
-		assert(word);	/* FIXME */
+		/* Double the capacity */
+		br->cap *= 2;
+		br->data = (unsigned char **)realloc(br->data, sizeof(unsigned char **) * br->cap);
 
-		/* FIXME */
-		i = (int)fread(word, sizeof(unsigned char), HASH_BYTE_SIZE, input);
-		assert(i == HASH_BYTE_SIZE || i == 0);
-
-		if(i == 0)
-			break;
-
-		i = fgetc(input);	/* Unsure about signedness here */
-		assert(i != EOF);
-		word[HASH_BYTE_SIZE] = (unsigned char)i;
-		assert(fread(&word[HASH_BYTE_SIZE + 1], sizeof(unsigned char), i, input) == (size_t)i);
-
-		word = (unsigned char *)realloc(word, HASH_BYTE_SIZE + 1 + i);
-
-		table_insert(table, word, &word[HASH_BYTE_SIZE]);
-	} while(!feof(input));
-}	
-
-void table_write(table_t *table, FILE *output)
-{
-	int i, j;
-
-	for(i = 0; i < TABLE_SIZE; i ++)
-		for(j = 0; j < table[i].n; j ++)
-		{
-			/* FIXME */
-			assert(fwrite(table[i].r[j].hash, sizeof(unsigned char), HASH_BYTE_SIZE, output) == HASH_BYTE_SIZE);
-			assert(fwrite(table[i].r[j].plain, sizeof(unsigned char), (size_t)*table[i].r[j].plain + 1, output)
-				== (size_t)*table[i].r[j].plain + 1);
-		}
-}
-
-unsigned char *table_search(table_t *table, unsigned char *hash)
-{
-	int i, j, k, c;
-	record_t *rl;
-
-	rl = table[(int)hash[0] + 256 * (int)hash[1]].r;
-
-	i = 0;
-	j = table[(int)hash[0] + 256 * (int)hash[1]].n - 1;
-
-	while(i <= j)
-	{
-		k = i + (j - i) / 2;
-		c = memcmp(rl[k].hash, hash, HASH_BYTE_SIZE);
-
-		if(c == 0)
-			return rl[k].plain;
-		else if(c < 0)
-			i = k + 1;
-		else
-			j = k - 1;
+		if(!br->data)
+			quit("error allocating store", strerror(errno));
 	}
 
-	return NULL;
+	/* Copy the blob and increment the count */
+	br->data[br->count ++] = blob;
 }
 
-void table_destroy(table_t *table)
+int cmp_blob(const void *x, const void *y)
 {
-	int i, j;
-	for(i = TABLE_SIZE; i --;)
-	{
-		if(table[i].c != 0)
-		{
-			for(j = table[i].n; j --;)
-			{
-				/* These are malloc'ed as one. Only need to free the hash */
-				free(table[i].r[j].hash);
-				/* free(table[i].r[j].plain); */
-			}
-
-			free(table[i].r);
-		}
-	}
-}
-
-int cmp_records(const void *x, const void *y)
-{
-	return memcmp(((const record_t *)x)->hash, ((const record_t *)y)->hash, HASH_BYTE_SIZE);
-}
-
-void branch_insert(branch_t *branch, unsigned char *plain, unsigned char *hash)
-{
-	assert(branch->n <= branch->c);
-
-	if(branch->c == 0)
-	{
-		branch->r = (record_t *)malloc(sizeof(record_t) * 256);
-		branch->c = 256;
-	}
-	else if(branch->n == branch->c)
-	{
-		branch->c *= 2;
-		branch->r = (record_t *)realloc((void *)branch->r, sizeof(record_t) * branch->c);
-	}
-
-	assert(branch->r);
-
-	branch->r[branch->n].hash = hash;
-	branch->r[branch->n].plain = plain;
-	branch->n ++;
+	/* Compare the hash tails to one another */
+	return memcmp(x, y, HASH_SIZE - INDEX_SIZE);
 }

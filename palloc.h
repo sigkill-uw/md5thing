@@ -1,5 +1,5 @@
 /*
-	main.c - entry point for md5thing.
+	palloc.h - header file for pooled string allocator
 	Copyright (C) 2015 Adam Richardson
 
 	This program is free software: you can redistribute it and/or modify
@@ -16,21 +16,18 @@
 	along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#define _MAIN_C_
+#ifndef _PALLOC_H_
+#define _PALLOC_H_
 
-#include <stdio.h>
+/* Initialize/destroy the pooled allocator subsystem */
+void palloc_init(void);
+void palloc_quit(void);
 
-#include "quit.h"
+/*
+	Allocate an array of unsigned char of at least `size` byte.
+	This doesn't return NULL on failure; in the spirit of our very specific use case,
+	it just kills the program.
+*/
+unsigned char *palloc_alloc(int size);
 
-int bmain(int argc, char **argv);
-int pmain(int argc, char **argv);
-void usage(void);
-
-int main(int argc, char **argv)
-{
-	/* In quit.c */
-	program_name = argv[0];
-	(void)argc;
-
-	return 0;
-}
+#endif
